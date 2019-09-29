@@ -26,7 +26,14 @@ def gen_id(typeOf):
     elif typeOf == 6:
         chars = string.digits+string.ascii_lowercase
         return 'PRS-'+''.join(random.choice(chars) for _ in range(3))
+    elif typeOf == 7:
+        chars = string.digits+string.ascii_lowercase
+        return ''.join(random.choice(chars) for _ in range(6))
     return None
+
+def gen_session_id():
+    chars = string.ascii_uppercase+string.ascii_lowercase+string.digits
+    return ''.join(random.choice(chars) for _ in range(6))
 
 def convertToBinaryData(filename):
     #Convert digital data to binary format
@@ -63,18 +70,6 @@ class Database:
                 ADDRESS TEXT NOT NULL)
                 """
             )
-
-            # self.cursor.execute(
-            #     """
-            #     CREATE TABLE PATIENT_RECORDS
-            #     (ID CHAR(10) NOT NULL,
-            #     CREATED TIMESTAMP NOT NULL,
-            #     FILE BLOB NOT NULL,
-            #     OWNER TEXT NOT NULL,
-            #     FOREIGN KEY(OWNER) REFERENCES PATIENTS(ID) ON DELETE CASCADE,
-            #     PRIMARY KEY(ID, OWNER))
-            #     """
-            # )
 
             self.cursor.execute(
                 """
@@ -143,6 +138,15 @@ class Database:
                 MEDICINE_NAME TEXT NOT NULL,
                 FOREIGN KEY(BY) REFERENCES STAFF(ID) ON DELETE CASCADE,
                 FOREIGN KEY(FOR) REFERENCES PATIENTS(ID) ON DELETE CASCADE)
+                """
+            )
+
+            self.cursor.execute(
+                """
+                CREATE TABLE AUTH
+                (USERNAME TEXT NOT NULL,
+                PASSWORD TEXT NOT NULL,
+                FOREIGN KEY(USERNAME) REFERENCES STAFF(ID) ON DELETE CASCADE)
                 """
             )
 
@@ -245,7 +249,7 @@ class Database:
             if self.connection:
                 self.connection.close()
 
-    def add_medication(self, category, name, expiry, stock):
+    def add_medication(self, category, name, expiry, stock, bat):
         try:
             self.connection = sqlite3.connect(self.name)
             self.cursor = self.connection.cursor()
@@ -257,7 +261,7 @@ class Database:
             (?, ?, ?, ?, ?)
             """
 
-            DATA = (gen_id(3), category, name, expiry, stock)
+            DATA = (bat, category, name, expiry, stock)
 
             self.cursor.execute(EXEC, DATA)
 
@@ -381,6 +385,34 @@ class Database:
             if self.connection:
                 self.connection.close()
 
+    def add_auth(self, username):
+        try:
+            self.connection = sqlite3.connect(self.name)
+            self.cursor = self.connection.cursor()
+
+            pwd = gen_id(7)
+
+            EXEC = """
+                INSERT INTO AUTH (USERNAME, PASSWORD)
+                VALUES (?, ?)
+            """
+
+            DATA = (username, pwd)
+
+            self.cursor.execute(EXEC, DATA)
+
+            return True
+
+        except sqlite3.OperationalError as e:
+            return e
+
+        finally:
+            self.connection.commit()
+
+            if self.connection:
+                self.connection.close()
+
+
     def retrieve_patient(self, id, include_all=False):
         try:
             self.connection = sqlite3.connect(self.name)
@@ -438,6 +470,26 @@ class Database:
             )
 
             return self.cursor.fetchone()[0]
+
+        except sqlite3.OperationalError as e:
+            return e
+
+        finally:
+            if self.connection:
+                self.connection.close()
+
+    def retrieve_auth_pwd(self, username):
+        try:
+            self.connection = sqlite3.connect(self.name)
+            self.cursor = self.connection.cursor()
+
+            self.cursor.execute(
+                f"""
+                SELECT PASSWORD FROM AUTH WHERE USERNAME='{username}'
+                """
+            )
+
+            return self.cursor.fetchone()
 
         except sqlite3.OperationalError as e:
             return e
@@ -958,6 +1010,56 @@ class Database:
         finally:
             self.connection.close()
 
+    def validate_batch(self, batch_no):
+        try:
+            self.connection = sqlite3.connect(self.name)
+            self.cursor = self.connection.cursor()
+
+            self.cursor.execute(
+                f"""
+                SELECT * FROM MEDICATION WHERE BATCH_NO='{batch_no}'
+                """
+            )
+
+            try:
+                a = len(self.cursor.fetchone())
+                return True
+
+            except:
+                return False
+
+        except sqlite3.OperationalError as e:
+            return e
+
+        finally:
+            if self.connection:
+                self.connection.close()
+
+    def validate_admin(self, username):
+        try:
+            self.connection = sqlite3.connect(self.name)
+            self.cursor = self.connection.cursor()
+
+            self.cursor.execute(
+                f"""
+                SELECT * FROM AUTH WHERE USERNAME='{username}' AND PASSWORD='1234'
+                """
+            )
+
+            try:
+                a = len(self.cursor.fetchone())
+                return True
+
+            except:
+                return False
+
+        except sqlite3.OperationalError as e:
+            return e
+
+        finally:
+            if self.connection:
+                self.connection.close()
+
     def validate_login(self, username, password):
         try:
             self.connection = sqlite3.connect(self.name)
@@ -965,15 +1067,38 @@ class Database:
 
             self.cursor.execute(
                 f"""
-                SELECT * FROM AUTH WHERE username='{username}' AND password='{password}'
+                SELECT * FROM AUTH WHERE USERNAME='{username}' AND PASSWORD='{password}'
                 """
             )
-            # print(len(self.cursor.fetchone()))
-
 
             try:
                 a = len(self.cursor.fetchone())
                 return True
+
+            except:
+                return False
+
+        except sqlite3.OperationalError as e:
+            return e
+
+        finally:
+            if self.connection:
+                self.connection.close()
+
+    def select_validate_login(self, username):
+        try:
+            self.connection = sqlite3.connect(self.name)
+            self.cursor = self.connection.cursor()
+
+            self.cursor.execute(
+                f"""
+                SELECT STAFF.TITLE, STAFF.F_NAME, STAFF.L_NAME, AUTH.USERNAME
+                FROM STAFF INNER JOIN AUTH ON STAFF.ID=AUTH.USERNAME WHERE STAFF.ID='{username}'
+                """
+            )
+
+            try:
+                return self.cursor.fetchone()
 
             except:
                 return False
@@ -1050,6 +1175,30 @@ class Database:
 
             try:
                 return self.cursor.fetchone()[0]
+
+            except:
+                return False
+
+        except sqlite3.OperationalError as e:
+            return e
+
+        finally:
+            if self.connection:
+                self.connection.close()
+
+    def count_medicine_cat(self, cat):
+        try:
+            self.connection = sqlite3.connect(self.name)
+            self.cursor = self.connection.cursor()
+
+            self.cursor.execute(
+                f"""
+                SELECT CATEGORY, COUNT(*) FROM MEDICATION WHERE CATEGORY='{cat}'
+                """
+            )
+
+            try:
+                return self.cursor.fetchall()
 
             except:
                 return False
